@@ -4,3 +4,7 @@ __pycache__/
 dataset/
 
 *.chkpt
+
+test_results_conv_lstm/
+
+test_results_ae_lstm/
