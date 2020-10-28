@@ -9,21 +9,20 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import os
 import time
-plt.ion()
 
 ### Hyperparameters ###
-seq_len = 5
-heatup_seq_len = 5
-batch_size = 4
+seq_len = 4
+heatup_seq_len = 10
+batch_size = 1
 num_workers = 8*2
-lr = 1e-5 #learning rate
+lr = 1e-3 #learning rate
 epoch = 10
 displaying = True
 weight_path_lstm = "weights_convlstm.chkpt"
 
 
 ### DATALOADER ###
-ds = PoolDataset(seq_len=seq_len, heatup_seq_len=heatup_seq_len, sum_channels=True)
+ds = PoolDataset(seq_len=seq_len, heatup_seq_len=heatup_seq_len, sum_channels=True, transform=lambda frames: (frames/frames.max()-0.5)*2)
 dataloader = DataLoader(
     ds,
     batch_size=batch_size,
@@ -35,23 +34,23 @@ dataloader = DataLoader(
 )
 
 ### MODELS ###
-lstm1 = ConvLSTM(1,32,3)
-lstm2 = ConvLSTM(32,1,1)
+lstm = nn.Sequential(
+    ConvLSTM(1,32,10),
+    ConvLSTM(32,1,1)
+)
 
 if os.path.isfile(weight_path_lstm):
     w = torch.load(weight_path_lstm)
-    lstm1.load_state_dict(w['lstm1'])
-    lstm2.load_state_dict(w['lstm2'])
+    lstm.load_state_dict(w['lstm'])
     del w
-lstm1 = lstm1.cuda()
-lstm2 = lstm2.cuda()
+lstm = lstm.cuda()
 
 ### OPTIM ###
 loss_func = nn.MSELoss()
 optimizer = optim.Adam(
-    list(lstm1.parameters())+list(lstm2.parameters()),
+    list(lstm.parameters()),
     lr=lr,
-    weight_decay=1e-5
+    #weight_decay=1e-5
     )
 if os.path.isfile(weight_path_lstm):
     w = torch.load(weight_path_lstm)
@@ -70,20 +69,22 @@ with torch.autograd.enable_grad():
             with torch.no_grad(): 
                 starter, sequence = sequence[:,:heatup_seq_len], sequence[:,heatup_seq_len:]
 
-                starter, (h1,c1) = lstm1(starter)
-                _, (h2, c2) = lstm2(starter)
+                state = []
+                for layer in lstm:
+                    starter, (h,c) = layer(starter)
+                    state.append([h,c])
 
             inference = []
             loss = 0
-            seq = sequence[:,:1]
-            for i in range(seq_len-1):
-                seq, (h1,c1) = lstm1(seq, (h1,c1))
-                seq, (h2,c2) = lstm2(seq, (h2,c2))
+            seq = sequence
 
-                loss += loss_func(seq, sequence[:, i+1:i+2])
+            for j,layer in enumerate(lstm):
+                seq, (h,c) = layer(seq, state[j])
+                state[j] = [h,c]
 
-                if i>seq_len-5:
-                    inference.append(seq.detach())
+            loss += loss_func(seq[:,:-1], sequence[:, 1:])
+
+            inference = [seq[:, :1], seq[:, seq_len//2:1+seq_len//2], seq[:,-1:]]
 
             loss.backward()
             optimizer.step()
@@ -101,9 +102,6 @@ with torch.autograd.enable_grad():
                     plt.plot(losses)
                     plt.pause(0.001)
                     plt.show()"""
-                    plt.figure(1)
-                    plt.clf()
-
                     plt.subplot(231)
                     plt.imshow(inference[0][0,0].sum(dim=0).cpu().numpy())
 
@@ -115,28 +113,25 @@ with torch.autograd.enable_grad():
 
 
                     plt.subplot(234)
-                    plt.imshow(sequence[0,-3].sum(dim=0).cpu().numpy())
+                    plt.imshow(sequence[0,1].sum(dim=0).cpu().numpy())
 
                     plt.subplot(235)
-                    plt.imshow(sequence[0,-2].sum(dim=0).cpu().numpy())
+                    plt.imshow(sequence[0,seq_len//2+1].sum(dim=0).cpu().numpy())
 
                     plt.subplot(236)
                     plt.imshow(sequence[0,-1].sum(dim=0).cpu().numpy())
 
-                    plt.pause(1e-3)
-                    plt.show()
+                    plt.savefig("tmp.png")
 
             if time.time() - last_save_time > 60*5: #save every 5 minutes
                 last_save_time = time.time()
                 print("saving...")
                 torch.save(
                     {
-                        'lstm1': lstm1.state_dict(),
-                        'lstm2': lstm2.state_dict(),
+                        'lstm': lstm.state_dict(),
                         'optimizer': optimizer.state_dict(),
                         'losses': losses
                     },
                     weight_path_lstm
                 )
                 print("saved")
-

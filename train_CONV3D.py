@@ -13,7 +13,7 @@ plt.ion()
 ### Hyperparameters ###
 seq_len = 5
 heatup_seq_len = 0
-batch_size = 
+batch_size = 1
 num_workers = 8
 lr = 1e-5 #learning rate
 epoch = 10

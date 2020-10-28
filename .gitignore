@@ -8,3 +8,7 @@ dataset/
 test_results_conv_lstm/
 
 test_results_ae_lstm/
+
+test_results_convlstm/
+
+tmp.png

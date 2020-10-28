@@ -151,6 +151,7 @@ class ConvLSTMCell(nn.Module):
             kernel_size=(3,3),
             padding=1
         )
+        #self.norm = nn.InstanceNorm2d(out_channels*4, affine=True)
 
     def forward(self, x, state):
         """
@@ -204,11 +205,145 @@ class ConvLSTM(nn.Module):
                 ).to(x.device)
             )
 
-        h = list(torch.split(state[0], self.out_channels, dim=1))
-        c = list(torch.split(state[1], self.out_channels, dim=1))
+        """h = list(torch.split(state[0], self.out_channels, dim=1))
+        c = list(torch.split(state[1], self.out_channels, dim=1))"""
 
+        h = [h_ for h_ in torch.split(state[0], self.out_channels, dim=1)]
+        c = [c_ for c_ in torch.split(state[1], self.out_channels, dim=1)]
 
         h[0],c[0] = self.cells[0](x[:, 0], (h[0], c[0]))
+        for layer in range(1, self.num_layers):
+            h[layer],c[layer] = self.cells[layer](h[layer-1], (h[layer], c[layer]))
+        out = h[-1].unsqueeze(1)
+
+
+        for time in range(1,x.shape[1]):
+            h[0],c[0] = self.cells[0](x[:, time], (h[0], c[0]))
+            for layer in range(1, self.num_layers):
+                h[layer],c[layer] = self.cells[layer](h[layer-1], (h[layer], c[layer]))
+            out = torch.cat((out, h[-1].unsqueeze(1)), dim=1)
+
+        h = torch.cat(h, dim=1)
+        c = torch.cat(c, dim=1)
+
+        return out, (h,c)
+
+class PredRNNCell(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(PredRNNCell, self).__init__()
+        self.sigmoid = nn.Sigmoid()
+        self.tanh = nn.Tanh()
+
+        self.out_channels = out_channels
+
+        self.conv_h = nn.Conv2d(
+            in_channels=in_channels+out_channels,
+            out_channels=4*out_channels,
+            kernel_size=(3,3),
+            padding=1
+        )
+
+        self.conv_m = nn.Conv2d(
+            in_channels=in_channels+out_channels,
+            out_channels=3*out_channels,
+            kernel_size=(3,3),
+            padding=1
+        )
+
+        self.conv_out = nn.Conv2d(
+            in_channels=3*out_channels,
+            out_channels=out_channels,
+            kernel_size=(3,3),
+            padding=1
+        )
+
+        self.conv_11 = nn.Conv2d(
+            in_channels=2*out_channels,
+            out_channels=out_channels,
+            kernel_size=(1,1),
+            padding=0
+        )
+    
+    def forward(self, x, state):
+        """
+        x: Tensor(B, Cin, D, W)
+        state: tuple(Tensor(B, Cout, D, W), Tensor(B, Cout, D, W)) or None
+        H,C,M
+        """
+        h, c , m = state
+
+        bottom_h = torch.cat((x, h), dim=1) #cat channel-wise
+        bottom_m = torch.cat((x, m), dim=1) #cat channel-wise
+
+        i_h, f_h, g_h, o = torch.split(self.conv_h(bottom_h), self.out_channels, dim=1)
+
+        i_m, f_m, g_m = torch.split(self.conv_m(bottom_m), self.out_channels, dim=1)
+
+        i_h = self.sigmoid(i_h)
+        f_h = self.sigmoid(f_h)
+        g_h = self.tanh(g_h)
+        c = c*f_h + i_h*g_h
+
+        g_m = self.tanh(g_m)
+        i_m = self.sigmoid(i_m)
+        f_m = self.sigmoid(f_m)
+
+        m = f_m*m + i_m*g_m
+        o = self.sigmoid(o + self.conv_out(torch.cat((c, m), dim=1)))
+        h = o*self.tanh(
+            self.conv_11(
+                torch.cat((c, m),dim=1)
+            )
+        )
+
+        return h,c,m
+
+class PredRNN(nn.Module):
+    def __init__(self, in_channels, out_channels, num_layers=1):
+        super(PredRNN, self).__init__()
+
+        self.out_channels = out_channels
+        self.num_layers = num_layers
+
+        self.cells = [
+            PredRNNCell(in_channels, out_channels)
+        ]
+
+        for _ in range(1, num_layers):
+            self.cells.append(PredRNNCell(out_channels, out_channels))
+
+        self.cells = nn.Sequential(
+            *self.cells
+        )
+
+    def forward(self, x, state=None):
+        """
+        state: H,C,M
+        """
+        if state is None:
+            state = (
+                torch.zeros(
+                    [x.shape[0], self.out_channels*self.num_layers, x.shape[-2], x.shape[-1]],
+                    requires_grad=True
+                ).to(x.device),
+                torch.zeros(
+                    [x.shape[0], self.out_channels*self.num_layers, x.shape[-2], x.shape[-1]],
+                    requires_grad=True
+                ).to(x.device),
+                torch.zeros(
+                    [x.shape[0], self.out_channels, x.shape[-2], x.shape[-1]],
+                    requires_grad=True
+                ).to(x.device)
+            )
+
+        """h = list(torch.split(state[0], self.out_channels, dim=1))
+        c = list(torch.split(state[1], self.out_channels, dim=1))"""
+
+        h = [h_ for h_ in torch.split(state[0], self.out_channels, dim=1)]
+        c = [c_ for c_ in torch.split(state[1], self.out_channels, dim=1)]
+        #m = m
+
+        h[0],c[0],m[0] = self.cells[0](x[:, 0], (h[0], c[0], m[0]))
         for layer in range(1, self.num_layers):
             h[layer],c[layer] = self.cells[layer](h[layer-1], (h[layer], c[layer]))
         out = h[-1].unsqueeze(1)

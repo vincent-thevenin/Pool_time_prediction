@@ -16,13 +16,15 @@ import threading
 from pool.pool.config import resolution
 
 class PoolDataset(Dataset):
-    def __init__(self, seq_len, heatup_seq_len=10, num_thread=None, sum_channels=True):
+    def __init__(self, seq_len, heatup_seq_len=10, num_thread=None, sum_channels=True, transform=None):
         self.turns = []
         self.seq_len = seq_len
         self.heatup_seq_len = heatup_seq_len
         self.max_seq_len = 0
         self.file_idx = []
         self.sum_channels = sum_channels
+        self.transform = transform
+        self.variance = 10
         
         games = os.listdir('dataset')
         for g in games:
@@ -54,16 +56,19 @@ class PoolDataset(Dataset):
             for j,position in enumerate(turn):
                 x,y = np.mgrid[0:256, 0:256]
                 pos = np.dstack((x, y))
-                rv = multivariate_normal([position[0]/(resolution[0]-1)*255, position[1]/(resolution[1]-1)*255], [[10.0, 0.0], [0.0, 10.0]]) #TODO Adapt variance
+                rv = multivariate_normal([position[0]/(resolution[0]-1)*255, position[1]/(resolution[1]-1)*255], [[self.variance, 0.0], [0.0, self.variance]]) #TODO Adapt variance
                 frame = rv.pdf(pos)
                 frames[i, j, :, :] = torch.from_numpy(frame)
         for i2 in range(i+1, self.seq_len+self.heatup_seq_len):
             frames[i2] = frames[i]
-        
+
         if self.sum_channels:
             frames = frames.sum(dim=1, keepdim=True)
 
-        return (frames/frames.max() - 0.5)*2
+        if self.transform is not None:
+            return self.transform(frames)
+        else:
+            return frames/frames.max()
     
     def __len__(self):
         length = 0
