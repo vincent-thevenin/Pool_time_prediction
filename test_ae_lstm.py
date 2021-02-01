@@ -69,14 +69,16 @@ with torch.no_grad():
             starter = starter.reshape(batch_size, -1, 2048)    
             _, (h,c) = lstm(starter)
 
-            seq = sequence.reshape(-1, 1, 256, 256).requires_grad_()
+            """seq = sequence.reshape(-1, 1, 256, 256).requires_grad_()
+            seq = encoder(seq)
+            seq = seq.reshape(batch_size, -1, 2048)"""
+            seq = sequence[:,0]
             seq = encoder(seq)
             seq = seq.reshape(batch_size, -1, 2048)
 
             for i in range(seq_len):
-                seq[:, i:i+1], (h,c) = lstm(seq[:, i:i+1], h, c)
+                seq, (h,c) = lstm(seq, h, c)
 
-            with torch.no_grad():
                 if displaying:
                     if not os.path.isdir("test_results_ae_lstm"):
                         os.mkdir('test_results_ae_lstm')
@@ -88,7 +90,7 @@ with torch.no_grad():
                         plt.figure(1)
 
                         plt.subplot(211)
-                        plt.imshow(decoder(seq[:,i])[0].sum(dim=0).cpu().numpy())
+                        plt.imshow(decoder(seq)[0].sum(dim=0).cpu().numpy())
 
                         plt.subplot(212)
                         plt.imshow(sequence[0,i+1].sum(dim=0).cpu().numpy())

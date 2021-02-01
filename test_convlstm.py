@@ -15,7 +15,7 @@ seq_len = 100
 heatup_seq_len = 10
 batch_size = 1
 num_workers = 8*2
-lr = 1e-3 #learning rate
+lr = 1e-4 #learning rate
 epoch = 10
 displaying = True
 weight_path_lstm = "weights_convlstm.chkpt"
@@ -35,7 +35,7 @@ dataloader = DataLoader(
 
 ### MODELS ###
 lstm = nn.Sequential(
-    ConvLSTM(1,32,10),
+    ConvLSTM(1,32,5),
     ConvLSTM(32,1,1)
 )
 

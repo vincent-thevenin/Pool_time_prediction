@@ -35,8 +35,8 @@ dataloader = DataLoader(
 
 ### MODELS ###
 lstm = nn.Sequential(
-    ConvLSTM(1,32,10),
-    ConvLSTM(32,1,1)
+    ConvLSTM(1,32, 5),
+    ConvLSTM(32,1, 1)
 )
 
 if os.path.isfile(weight_path_lstm):
@@ -74,19 +74,20 @@ with torch.autograd.enable_grad():
                     starter, (h,c) = layer(starter)
                     state.append([h,c])
 
-            inference = []
-            loss = 0
-            seq = sequence
+            with torch.autograd.set_detect_anomaly(True):
+                inference = []
+                loss = 0
+                seq = sequence
 
-            for j,layer in enumerate(lstm):
-                seq, (h,c) = layer(seq, state[j])
-                state[j] = [h,c]
+                for j,layer in enumerate(lstm):
+                    seq, (h,c) = layer(seq, state[j])
+                    state[j] = [h,c]
 
-            loss += loss_func(seq[:,:-1], sequence[:, 1:])
+                loss += loss_func((seq[:,:-1]+1)/2, (sequence[:, 1:]+1)/2)
 
-            inference = [seq[:, :1], seq[:, seq_len//2:1+seq_len//2], seq[:,-1:]]
+                inference = [seq[:, :1], seq[:, seq_len//2:1+seq_len//2], seq[:,-1:]]
 
-            loss.backward()
+                loss.backward()
             optimizer.step()
             optimizer.zero_grad()
 
